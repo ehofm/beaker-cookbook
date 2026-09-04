@@ -149,6 +149,14 @@ def _model_for_runtime(runtime: Any) -> ModelSpec:
     return ModelSpec()
 
 
+def _trace_provider(model_name: str) -> str:
+    if ":" in model_name:
+        return model_name.split(":", 1)[0].lower()
+    if "/" in model_name:
+        return model_name.split("/", 1)[0].lower()
+    return "openai"
+
+
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -177,8 +185,20 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
         "automationbench.run_one",
         inputs={"task_name": task_name, "model": model.name},
     ) as stage:
-        with runtime.trace.model_call(model=model.name):
+        with runtime.trace.model_call(
+            operation="chat.completions",
+            provider=_trace_provider(model.name),
+            model=model.name,
+            input_messages=sample.prompt,
+        ) as model_span:
             result = await run_one_async(sample, model=model, skills_dir=skills_dir)
+            model_span.output(
+                {
+                    TASK_COMPLETED_FIELD: result.task_completed_correctly,
+                    PARTIAL_CREDIT_FIELD: result.partial_credit,
+                    "error": result.error,
+                }
+            )
         stage.output(
             {
                 TASK_COMPLETED_FIELD: result.task_completed_correctly,
